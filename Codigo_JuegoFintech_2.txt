@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fintech Tycoon</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen">
+<div id="app" class="min-h-screen"></div>
+<script>
+// =====================================================================
+// FINTECH TYCOON - version independiente (no requiere Claude)
+// =====================================================================
+// PASO 1 (OBLIGATORIO): pega aqui la configuracion de tu proyecto
+// Firebase. Instrucciones completas en el chat. Debe incluir databaseURL.
+// =====================================================================
+const firebaseConfig = {
+  apiKey: "AIzaSyCdMTmBwkqeyPjKEdeqHFEAT9PXUm11APY",
+  authDomain: "juego-fintech.firebaseapp.com",
+  databaseURL: "https://juego-fintech-default-rtdb.firebaseio.com",
+  projectId: "juego-fintech",
+  storageBucket: "juego-fintech.firebasestorage.app",
+  messagingSenderId: "33477689336",
+  appId: "1:33477689336:web:6a65eb615e6635a93d200d"
+};
+
+// ============ CALIBRACION DEL JUEGO (ajustable) ======================
+const CONFIG = {
+  BUDGET: 10,
+  ROUNDS: 8,
+  TIMER: 120,
+  START: { cli: 100, cap: 100, rep: 50 }
+};
+const ROOT = "fintech-tycoon";
+const TEAM_COLORS = ["#34d399","#60a5fa","#fbbf24","#f472b6","#a78bfa","#f87171","#2dd4bf","#fb923c"];
+const AREAS = [
+  { id: "tech",  name: "Tecnología",     icon: "💻" },
+  { id: "cyber", name: "Ciberseguridad", icon: "🔒" },
+  { id: "comp",  name: "Cumplimiento",   icon: "⚖️" },
+  { id: "mkt",   name: "Marketing",      icon: "📣" },
+  { id: "liq",   name: "Liquidez",       icon: "💰" }
+];
+const AREA_BY_ID = {}; AREAS.forEach(a => AREA_BY_ID[a.id] = a);
+const ZERO = { tech: 0, cyber: 0, comp: 0, mkt: 0, liq: 0 };
+const DEFAULT_ALLOC = { tech: 2, cyber: 2, comp: 2, mkt: 2, liq: 2 };
+
+const EVENTS = {
+  1: {
+    title: "¡Se cayó la app en plena quincena!",
+    tag: "Inspirado en: caídas reales de apps bancarias en días de pago",
+    desc: "Era día de pago y medio país entró a su app al mismo tiempo. Los sistemas de los neobancos colapsaron. ¿Aguantó el suyo?",
+    areaLabel: "Tecnología",
+    metric: c => c.tech, hi: 4, mid: 2,
+    fx: {
+      hi:  { d: { cli: 5, rep: 5 },    msg: "Su app aguantó el pico como campeona. Clientes furiosos de otros bancos se pasaron al suyo." },
+      mid: { d: { cli: -3, rep: -5 },  msg: "La app se cayó un rato. Hubo quejas, pero nada grave." },
+      low: { d: { cli: -8, rep: -12 }, msg: "La app estuvo caída horas en pleno día de pago. Furia total en redes sociales." }
+    }
+  },
+  2: {
+    title: "¡Roban cuentas con identidades falsas!",
+    tag: "Inspirado en: olas de fraude digital en la banca",
+    desc: "Delincuentes se hicieron pasar por clientes y vaciaron cuentas en varios bancos digitales. La ley obliga a los bancos a devolver el dinero robado.",
+    areaLabel: "Ciberseguridad",
+    metric: c => c.cyber, hi: 6, mid: 3,
+    fx: {
+      hi:  { d: { cli: 4, rep: 5 },     msg: "Sus defensas bloquearon el ataque. Ganaron fama de banco seguro y llegaron clientes nuevos." },
+      mid: { d: { cap: -10, rep: -6 },  msg: "El ataque les pegó, pero sus defensas contuvieron buena parte del daño." },
+      low: { d: { cap: -25, rep: -15 }, msg: "Les vaciaron cuentas y tuvieron que devolver todo el dinero robado. Golpe durísimo." }
+    }
+  },
+  3: {
+    title: "Nueva ley para bancos digitales",
+    tag: "Inspirado en: la regulación MiCA (Europa, 2023)",
+    desc: "Tras la ola de fraudes, el gobierno expidió una ley estricta para bancos digitales... y llegó con auditoría sorpresa. Multas millonarias para quien no estaba listo.",
+    areaLabel: "Cumplimiento",
+    metric: c => c.comp, hi: 7, mid: 4,
+    fx: {
+      hi:  { d: { rep: 6 },            msg: "Pasaron la auditoría con honores: el regulador los puso de ejemplo ante todo el sector." },
+      mid: { d: { cap: -12, rep: -2 }, msg: "Cumplían a medias: sanción menor y varios ajustes obligatorios." },
+      low: { d: { cap: -30, rep: -8 }, msg: "Multa millonaria por incumplir la nueva ley. El regulador los tiene en la mira." }
+    }
+  },
+  4: {
+    title: "¡Se filtraron los datos de miles de clientes!",
+    tag: "Inspirado en: filtraciones masivas de datos en la banca",
+    desc: "Piratas informáticos publicaron datos personales de clientes de varios bancos digitales. Hay multas para quienes protegían mal la información... y clientes furiosos.",
+    areaLabel: "Ciberseguridad + Cumplimiento",
+    metric: c => c.cyber + c.comp, hi: 15, mid: 9,
+    fx: {
+      hi:  { d: { cli: 3, rep: 6 },     msg: "Sus datos estaban blindados y su manejo fue impecable ante la ley. Salieron fortalecidos de la crisis." },
+      mid: { d: { cap: -12, rep: -6 },  msg: "Se les escapó parte de la información. Multa moderada y disculpas públicas." },
+      low: { d: { cap: -25, rep: -14 }, msg: "Filtración masiva: multa fuerte por descuidar los datos de sus clientes, que están indignados." }
+    }
+  },
+  5: {
+    title: "¡Video viral los acusa de cobros escondidos!",
+    tag: "Inspirado en: crisis de reputación en redes sociales",
+    desc: "Un influencer con millones de seguidores acusó a los bancos digitales de cobros escondidos. Verdad o no, el país entero está hablando de eso.",
+    areaLabel: "Marketing",
+    metric: c => c.mkt, hi: 11, mid: 6,
+    fx: {
+      hi:  { d: { cli: 6, rep: 4 },    msg: "Respondieron con transparencia y buen humor. El video terminó jugando a su favor." },
+      mid: { d: { cli: -6, rep: -4 },  msg: "Respondieron tarde. Perdieron clientes mientras aclaraban las cosas." },
+      low: { d: { cli: -14, rep: -8 }, msg: "Nadie contó su versión: la acusación se volvió «verdad» y los clientes se fueron." }
+    }
+  },
+  6: {
+    title: "¡Pánico! Todos quieren sacar su plata",
+    tag: "Inspirado en: la corrida digital de Silicon Valley Bank (2023)",
+    desc: "Un rumor en redes dice que los bancos digitales van a quebrar. Miles de personas intentan retirar todo su dinero al mismo tiempo, desde el celular, en cuestión de minutos.",
+    areaLabel: "Liquidez",
+    metric: c => c.liq, hi: 11, mid: 6,
+    repShield: true,
+    fx: {
+      hi:  { d: { cli: 6, rep: 6 },               msg: "Tenían caja de sobra: pagaron a todos sin despeinarse y el pánico se les convirtió en confianza." },
+      mid: { d: { cli: -10, cap: -8, rep: -3 },   msg: "Aguantaron la corrida raspando: perdieron clientes y tuvieron que vender activos a la carrera." },
+      low: { d: { cli: -25, cap: -20, rep: -10 }, msg: "No pudieron responder a los retiros. Fuga masiva de clientes y rescate de emergencia." }
+    }
+  },
+  7: {
+    title: "La competencia lanzó un asesor con inteligencia artificial",
+    tag: "Inspirado en: el asistente de IA de Klarna y la banca con IA",
+    desc: "Un banco rival lanzó un asistente de inteligencia artificial que atiende al instante, a cualquier hora y sin filas. Los clientes ya no quieren esperar.",
+    areaLabel: "Tecnología",
+    metric: c => c.tech, hi: 14, mid: 8,
+    fx: {
+      hi:  { d: { cli: 8, rep: 5 },    msg: "Tenían la tecnología lista y lanzaron su propio asistente esa misma semana. Golpe de autoridad." },
+      mid: { d: { cli: -5 },           msg: "Van tarde, pero alcanzan a reaccionar. Perdieron algunos clientes impacientes." },
+      low: { d: { cli: -15, rep: -6 }, msg: "Su servicio se ve lento y anticuado al lado del rival. Fuga de clientes jóvenes." }
+    }
+  },
+  8: {
+    title: "Llega la competencia pesada",
+    tag: "Inspirado en: Pix / Bre-B y la entrada de las BigTech",
+    desc: "El banco central lanzó pagos gratis e instantáneos para todo el país, y una gigante tecnológica regaló cuentas sin costo. Ya no gana el más grande, sino el que ofrece algo mejor.",
+    areaLabel: "Marketing + Tecnología",
+    metric: c => c.mkt + c.tech, hi: 30, mid: 18,
+    fx: {
+      hi:  { d: { cli: 12, rep: 5 },   msg: "Su banco ofrece algo que ni los pagos gratis ni la BigTech tienen. Los clientes se quedan y llegan más." },
+      mid: { d: { cli: -8 },           msg: "Sobreviven, pero perdieron terreno frente a los nuevos competidores." },
+      low: { d: { cli: -25, rep: -8 }, msg: "Entre pagos gratis y cuentas sin costo, muchos clientes no encontraron razones para quedarse." }
+    }
+  }
+};
+
+function reportsFor(round, cum) {
+  const r = (areaId, text) => ({ areaId, text });
+  if (round === 1) return [
+    r("tech","La app se cae cuando entra mucha gente al mismo tiempo. La calificación en las tiendas de aplicaciones bajó de 4.5 a 3.8 estrellas. Pedimos refuerzo urgente."),
+    r("cyber","Sistemas estables. Detectamos algunos intentos de robo de cuentas, nada fuera de lo común por ahora."),
+    r("comp","Sin novedades. Se rumora que el gobierno estudia nuevas reglas para los bancos digitales."),
+    r("mkt","Crecimiento normal: +2% de clientes este mes. Eso sí, la competencia está gastando más que nosotros en publicidad."),
+    r("liq","Caja sana. Un dato para vigilar: el 40% de los depósitos pertenece a unos pocos clientes muy grandes.")
+  ];
+  if (round === 2) return [
+    cum.cyber >= 2
+      ? r("cyber","Las mejoras funcionan: bloqueamos el 90% de los intentos de robo de cuentas. Pero los ataques crecen en todo el sector: no bajemos la guardia.")
+      : r("cyber","Los intentos de robo de cuentas se triplicaron y nuestro sistema para verificar la identidad de los clientes falla seguido. Somos un blanco fácil."),
+    cum.tech >= 2
+      ? r("tech","La inversión dio frutos: la app ya casi no se cae y la calificación subió a 4.3 estrellas.")
+      : r("tech","La app sigue fallando en horas pico. Las quejas en redes continúan."),
+    r("mkt","Llevamos 3 meses seguidos perdiendo clientes (-3% este mes). Recomendamos una campaña urgente para frenar la fuga."),
+    r("comp","El gobierno confirmó que prepara nuevas reglas para los bancos digitales. Todavía no hay fecha."),
+    r("liq","Los depósitos siguen concentrados en pocos clientes grandes. Si alguno se va, se sentiría duro.")
+  ];
+  if (round === 3) return [
+    cum.comp >= 4
+      ? r("comp","Vamos adelantados: ya cumplimos la mayoría de los requisitos del borrador de la nueva ley. El regulador nos ve con buenos ojos.")
+      : r("comp","La nueva ley para bancos digitales es inminente y NO estamos preparados. Una multa nos costaría millones."),
+    cum.cyber >= 6
+      ? r("cyber","Tras el golpe que sufrió el sector, somos de los bancos más seguros. Ojo: se rumora que piratas informáticos están vendiendo bases de datos robadas.")
+      : r("cyber","Seguimos reparando el daño del fraude. Y ahora se rumora que piratas informáticos venden bases de datos robadas de varios bancos."),
+    cum.mkt >= 4
+      ? r("mkt","La campaña frenó la caída: volvimos a crecer +1% en clientes este mes.")
+      : r("mkt","La fuga de clientes continúa (-4% este mes). Cada vez cuesta más recuperarlos."),
+    r("liq","Los depósitos siguen concentrados en pocos clientes grandes. Si alguno se va, se sentiría duro."),
+    r("tech","Sistemas estables tras las mejoras que hizo el sector.")
+  ];
+  if (round === 4) return [
+    cum.cyber >= 7
+      ? r("cyber","Nuestros datos están cifrados y bien protegidos. Aun así, anoche detectamos dos intentos de entrar a nuestra base de datos: los piratas están atacando a todo el sector.")
+      : r("cyber","Detectamos intentos de robo de nuestra base de datos y la información de los clientes está poco protegida. Un descuido aquí saldría carísimo."),
+    cum.comp >= 6
+      ? r("comp","Tenemos los protocolos de manejo de datos al día: si algo llegara a pasar, sabemos exactamente cómo responder ante la ley.")
+      : r("comp","No tenemos protocolos claros de protección de datos. Si se filtra información, la ley nos castigaría con el doble de dureza."),
+    r("mkt","La competencia lanzó una campaña publicitaria agresiva. Sugerimos responder para no perder terreno."),
+    r("liq","Caja estable. Los clientes grandes siguen concentrando buena parte de los depósitos."),
+    r("tech","La app funciona con normalidad.")
+  ];
+  if (round === 5) return [
+    cum.mkt >= 8
+      ? r("mkt","Nuestra comunidad en redes es fuerte y nos defiende sola. Aun así, los influencers financieros andan de cacería buscando el próximo escándalo bancario.")
+      : r("mkt","Casi no tenemos presencia en redes y no sabríamos responder a una crisis pública. Los influencers financieros andan de cacería buscando escándalos."),
+    cum.cyber >= 9
+      ? r("cyber","Tras la filtración que golpeó al sector, nuestra seguridad es puesta de ejemplo.")
+      : r("cyber","La filtración de datos del sector nos dejó clientes desconfiados que preguntan por la seguridad de su información."),
+    r("comp","El regulador sigue vigilando de cerca el manejo de datos en todo el sector."),
+    r("liq","La economía se está enfriando: algunos clientes empiezan a retirar sus ahorros para cubrir gastos."),
+    r("tech","El banco central anunció que estudia crear un sistema de pagos gratis para todo el país.")
+  ];
+  if (round === 6) return [
+    cum.liq >= 8
+      ? r("liq","Construimos un colchón de efectivo sólido: si muchos clientes retiran a la vez, podemos responder sin problema.")
+      : r("liq","Si el 20% de los clientes retirara su plata al mismo tiempo, no podríamos pagarles. Y en redes circulan rumores feos sobre los bancos digitales."),
+    r("mkt","En redes sociales crece el rumor de que los bancos digitales «se van a quebrar». El miedo se contagia rápido."),
+    cum.comp >= 9
+      ? r("comp","Pasamos las revisiones del regulador sin problemas. Eso da tranquilidad a clientes e inversionistas.")
+      : r("comp","El regulador nos tiene bajo la lupa. Cualquier error nuevo saldría caro."),
+    r("cyber","Sin ataques nuevos. El sector sigue en alerta."),
+    r("tech","El banco central confirmó su sistema de pagos gratis e instantáneos. En el sector también se habla de asistentes con inteligencia artificial.")
+  ];
+  if (round === 7) return [
+    cum.tech >= 12
+      ? r("tech","Nuestra tecnología está al día: podríamos lanzar un asistente con inteligencia artificial en cuestión de semanas.")
+      : r("tech","Nuestros sistemas están quedados: la competencia habla de inteligencia artificial y nosotros seguimos apagando incendios."),
+    r("mkt","Los clientes jóvenes valoran la atención instantánea a cualquier hora. La paciencia con las filas virtuales se acabó."),
+    cum.liq >= 12
+      ? r("liq","Sobrevivimos al pánico con caja sana. Los clientes grandes se quedaron con nosotros.")
+      : r("liq","La corrida nos dejó débiles de caja. Toca reconstruir la confianza poco a poco."),
+    r("cyber","Sistemas estables."),
+    r("comp","El regulador estudia reglas para el uso de inteligencia artificial en los bancos.")
+  ];
+  return [
+    r("mkt","Una gigante tecnológica lanzará cuentas gratis para todo el mundo. Si no le damos a la gente una razón para quedarse, se van."),
+    cum.tech >= 14
+      ? r("tech","Nuestra app está lista para conectarse al nuevo sistema de pagos gratis del banco central desde el día uno.")
+      : r("tech","Nuestra app NO está lista para el nuevo sistema de pagos gratis. Quedarnos por fuera sería quedar obsoletos."),
+    r("liq","Caja estable. El mercado espera movimientos grandes esta temporada."),
+    r("cyber","Sistemas estables. Hoy la seguridad es lo mínimo que la gente espera de un banco."),
+    r("comp","El regulador anunció que también vigilará a las gigantes tecnológicas que entren al negocio financiero.")
+  ];
+}
+
+// ============================ utilidades ==============================
+const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
+const valuation = ind => Math.round(ind.cap + ind.cli * 0.6 + ind.rep * 0.8);
+const sumAlloc = a => AREAS.reduce((s,ar) => s + (a[ar.id]||0), 0);
+const slug = n => (n||"").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,"").slice(0,24);
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const tierOf = (ev,cum) => { const m = ev.metric(cum); return m >= ev.hi ? "hi" : m >= ev.mid ? "mid" : "low"; };
+const TONE = {
+  alert: "border-red-500 bg-red-950 text-red-100",
+  warn:  "border-amber-500 bg-amber-950 text-amber-100",
+  ok:    "border-emerald-500 bg-emerald-950 text-emerald-100",
+  info:  "border-slate-600 bg-slate-900 text-slate-300"
+};
+const TIER_STYLE = {
+  hi:  "bg-emerald-900 text-emerald-200 border border-emerald-600",
+  mid: "bg-amber-900 text-amber-200 border border-amber-600",
+  low: "bg-red-900 text-red-200 border border-red-600"
+};
+const TIER_LABEL = { hi: "PREPARADOS", mid: "A MEDIAS", low: "EXPUESTOS" };
+
+function fmtDeltas(d) {
+  d = d || {};
+  const parts = [];
+  if (d.cli) parts.push({ t: (d.cli>0?"+":"")+d.cli+"k clientes", neg: d.cli<0 });
+  if (d.cap) parts.push({ t: (d.cap>0?"+":"")+"$"+d.cap+"M", neg: d.cap<0 });
+  if (d.rep) parts.push({ t: (d.rep>0?"+":"")+d.rep+" reputación", neg: d.rep<0 });
+  if (!parts.length) parts.push({ t: "sin cambios", neg: false });
+  return parts.map(p => '<span class="text-xs font-bold px-2 py-1 rounded ' + (p.neg?"bg-red-900 text-red-200":"bg-emerald-900 text-emerald-200") + '">' + p.t + '</span>').join(" ");
+}
+
+// ============================ estado global ===========================
+const configured = firebaseConfig.apiKey !== "PEGA_AQUI" && firebaseConfig.databaseURL !== "PEGA_AQUI";
+let db = null, refGame = null, refTeams = null;
+let mode = null;            // null | "host" | "team"
+let game = null;            // estado del juego (lo escribe la pantalla central)
+let teamsData = {};         // datos crudos de los equipos (decisiones)
+let connected = false;
+let nameVal = "";           // input del nombre del banco
+let teamId = null, teamDoc = null, joinedGameId = null;
+let alloc = Object.assign({}, ZERO);
+let sentRound = 0, lastRoundSeen = 0;
+let overrides = {}, editing = null;
+let errMsg = "";
+
+if (configured) {
+  try {
+    firebase.initializeApp(firebaseConfig);
+    db = firebase.database();
+    refGame = db.ref(ROOT + "/game");
+    refTeams = db.ref(ROOT + "/teams");
+    db.ref(".info/connected").on("value", s => { connected = !!s.val(); render(); });
+    refGame.on("value", s => { game = s.val(); onGameChange(); render(); });
+    refTeams.on("value", s => { teamsData = s.val() || {}; onTeamsChange(); render(); });
+  } catch (e) {
+    console.error(e);
+  }
+}
+setInterval(() => { if (game && game.phase === "deciding") render(); }, 1000);
+
+function onGameChange() {
+  // si la pantalla central reinicio la partida, el equipo vuelve al registro
+  if (teamId && game && joinedGameId && game.gameId !== joinedGameId) {
+    teamId = null; teamDoc = null; joinedGameId = null; sentRound = 0; lastRoundSeen = 0;
+    errMsg = "El moderador inició una partida nueva. Registra tu banco otra vez.";
+  }
+  // al empezar una ronda nueva, cargar decision previa o arrancar en ceros
+  if (teamId && teamDoc && game && game.phase === "deciding" && game.round !== lastRoundSeen) {
+    const prev = teamDoc.decisions && teamDoc.decisions[game.round];
+    alloc = prev ? Object.assign({}, ZERO, prev) : Object.assign({}, ZERO);
+    sentRound = prev ? game.round : 0;
+    lastRoundSeen = game.round;
+  }
+}
+
+function onTeamsChange() {
+  // la pantalla central admite equipos nuevos mientras esta en la sala de espera
+  if (mode !== "host" || !game || game.phase !== "lobby") return;
+  const current = game.teams || {};
+  Object.keys(teamsData).forEach(id => {
+    const t = teamsData[id];
+    if (t && t.gameId === game.gameId && !current[id]) {
+      db.ref(ROOT + "/game/teams/" + id).set({
+        name: t.name,
+        color: TEAM_COLORS[Object.keys(current).length % TEAM_COLORS.length],
+        ind: Object.assign({}, CONFIG.START),
+        cum: Object.assign({}, ZERO)
+      });
+      current[id] = true;
+    }
+  });
+}
+
+// ============================ acciones ================================
+function pickMode(m) { mode = m; errMsg = ""; render(); }
+function goHome() { mode = null; render(); }
+function setName(v) { nameVal = v; }
+function adjAlloc(a, d) {
+  const total = sumAlloc(alloc);
+  if (d > 0 && total >= CONFIG.BUDGET) return;
+  alloc[a] = Math.max(0, (alloc[a]||0) + d);
+  render();
+}
+function adjOv(id, a, d) {
+  const cur = overrides[id] || Object.assign({}, ZERO);
+  const total = sumAlloc(cur);
+  if (d > 0 && total >= CONFIG.BUDGET) return;
+  cur[a] = Math.max(0, (cur[a]||0) + d);
+  overrides[id] = cur;
+  render();
+}
+function clearOv(id) { delete overrides[id]; editing = null; render(); }
+function toggleEdit(id) { editing = editing === id ? null : id; render(); }
+
+function createGame() {
+  refGame.set({ gameId: Math.random().toString(36).slice(2,8), phase: "lobby", round: 0, teams: null, outcomes: null });
+}
+function resetGame() {
+  if (!confirm("¿Borrar la partida actual y todos los equipos registrados?")) return;
+  overrides = {}; editing = null;
+  refTeams.set(null).then(createGame);
+}
+function startGame() {
+  refGame.update({ phase: "deciding", round: 1, roundStartedAt: Date.now() });
+}
+function nextRound() {
+  if (game.round >= CONFIG.ROUNDS) { refGame.update({ phase: "final" }); return; }
+  refGame.update({ phase: "deciding", round: game.round + 1, roundStartedAt: Date.now(), outcomes: null });
+}
+function resolveRound() {
+  const round = game.round, ev = EVENTS[round];
+  const teams = game.teams || {};
+  const ids = Object.keys(teams);
+  const missing = ids.filter(id => {
+    const t = teamsData[id];
+    return !(t && t.decisions && t.decisions[round]) && !overrides[id];
+  });
+  if (missing.length > 0) {
+    const names = missing.map(id => teams[id].name).join(", ");
+    if (!confirm("Sin decisión: " + names + ". Se les asignará inversión repartida (2 en cada área). ¿Cerrar la ronda y revelar el evento?")) return;
+  }
+  const g = JSON.parse(JSON.stringify(game));
+  g.teams = g.teams || {};
+  const outcomes = {};
+  ids.forEach(id => {
+    const t = g.teams[id];
+    t.cum = Object.assign({}, ZERO, t.cum || {});
+    const td = teamsData[id];
+    const sent = td && td.decisions ? td.decisions[round] : null;
+    const alloc0 = overrides[id] || sent || Object.assign({}, DEFAULT_ALLOC);
+    const al = Object.assign({}, ZERO, alloc0);
+    const cum = {};
+    AREAS.forEach(a => { cum[a.id] = (t.cum[a.id]||0) + (al[a.id]||0); });
+    const prevVal = valuation(t.ind);
+    const ind = Object.assign({}, t.ind);
+    ind.cap = Math.round(ind.cap + ind.cli * 0.15);
+    ind.cli = Math.round(ind.cli + al.mkt * 5);
+    ind.rep = clamp(Math.round(ind.rep + al.tech * 2 - 4), 0, 100);
+    const tier = tierOf(ev, cum);
+    const d = Object.assign({}, ev.fx[tier].d);
+    let shielded = false;
+    if (ev.repShield && tier !== "hi" && t.ind.rep >= 65) {
+      shielded = true;
+      ["cli","cap","rep"].forEach(k => { if (d[k] && d[k] < 0) d[k] = Math.round(d[k]/2); });
+    }
+    ind.cli = Math.max(0, Math.round(ind.cli + (d.cli||0)));
+    ind.cap = Math.round(ind.cap + (d.cap||0));
+    ind.rep = clamp(Math.round(ind.rep + (d.rep||0)), 0, 100);
+    t.ind = ind; t.cum = cum;
+    outcomes[id] = { tier: tier, d: d, shielded: shielded, defaulted: !sent && !overrides[id], prevVal: prevVal, msg: ev.fx[tier].msg };
+  });
+  g.phase = "results"; g.outcomes = outcomes; g.eventRound = round;
+  overrides = {}; editing = null;
+  refGame.set(g);
+}
+
+function join() {
+  errMsg = "";
+  if (!game) { errMsg = "Aún no hay partida creada. Pide a los moderadores abrir la pantalla central."; render(); return; }
+  const id = slug(nameVal);
+  if (!id) { errMsg = "Escribe el nombre de tu neobanco."; render(); return; }
+  refTeams.child(id).once("value").then(s => {
+    const existing = s.val();
+    if (existing && existing.gameId === game.gameId) {
+      teamDoc = existing; teamId = id; joinedGameId = game.gameId; lastRoundSeen = 0;
+      onGameChange(); render();
+      return;
+    }
+    if (game.phase !== "lobby") {
+      errMsg = "La partida ya empezó. Si tu equipo ya estaba registrado, escribe el nombre EXACTO para reconectarte.";
+      render(); return;
+    }
+    const doc = { name: nameVal.trim(), gameId: game.gameId, decisions: null };
+    refTeams.child(id).set(doc).then(() => {
+      teamDoc = { name: doc.name, gameId: doc.gameId, decisions: {} };
+      teamId = id; joinedGameId = game.gameId; lastRoundSeen = 0;
+      render();
+    }).catch(() => { errMsg = "No se pudo registrar. Revisa tu conexión."; render(); });
+  });
+}
+
+function submitDecision() {
+  const decisions = Object.assign({}, teamDoc.decisions || {});
+  decisions[game.round] = Object.assign({}, alloc);
+  refTeams.child(teamId).update({ decisions: decisions }).then(() => {
+    teamDoc.decisions = decisions;
+    sentRound = game.round;
+    errMsg = "";
+    render();
+  }).catch(() => { errMsg = "No se pudo enviar. Revisa tu conexión e intenta de nuevo."; render(); });
+}
+
+// ============================ vistas ==================================
+function render() {
+  document.getElementById("app").innerHTML = view();
+}
+
+function view() {
+  if (!configured) return setupView();
+  if (!mode) return landing();
+  return mode === "host" ? hostView() : teamView();
+}
+
+function setupView() {
+  return '<div class="min-h-screen flex items-center justify-center p-6"><div class="max-w-lg rounded-2xl border border-amber-500 bg-amber-950 p-6 text-amber-100">' +
+    '<h1 class="text-2xl font-black mb-3">⚙️ Falta un paso de configuración</h1>' +
+    '<p class="mb-2">Este archivo aún no tiene conectada su base de datos. Abre <b>index.html</b> con un editor de texto y pega la configuración de Firebase en el bloque marcado como <b>PEGA_AQUI</b> (al inicio del código).</p>' +
+    '<p class="text-amber-300 text-sm">Las instrucciones completas están en el chat con Claude.</p></div></div>';
+}
+
+function header(showReset) {
+  return '<div class="flex items-center justify-between mb-8">' +
+    '<button onclick="goHome()" class="text-slate-500 text-sm underline">← inicio</button>' +
+    '<div class="font-black tracking-tight">FINTECH <span class="text-emerald-400">TYCOON</span> ' +
+    (connected ? '<span class="text-emerald-400 text-xs">●</span>' : '<span class="text-red-400 text-xs">● sin conexión</span>') + '</div>' +
+    (showReset ? '<button onclick="resetGame()" class="text-slate-500 text-sm underline">nueva partida</button>' : "<span></span>") +
+    "</div>";
+}
+
+function landing() {
+  return '<div class="min-h-screen flex flex-col items-center justify-center p-6">' +
+    '<div class="text-emerald-400 text-sm font-semibold tracking-widest mb-2 text-center">MERCADOS FINANCIEROS · FINTECH Y BANCA DIGITAL</div>' +
+    '<h1 class="text-5xl md:text-6xl font-black tracking-tight mb-3 text-center">FINTECH <span class="text-emerald-400">TYCOON</span></h1>' +
+    '<p class="text-slate-400 text-center max-w-md mb-10">Cada junta directiva dirige su propio neobanco. Lean los reportes, inviertan con cabeza y sobrevivan a lo que viene.</p>' +
+    '<div class="flex flex-col md:flex-row gap-4 w-full max-w-lg">' +
+    '<button onclick="pickMode(\'host\')" class="flex-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-2xl p-6 text-lg">📺 Pantalla central<div class="text-sm font-medium mt-1 opacity-80">Para proyectar (moderadores)</div></button>' +
+    '<button onclick="pickMode(\'team\')" class="flex-1 bg-slate-800 hover:bg-slate-700 border border-slate-600 font-bold rounded-2xl p-6 text-lg">📱 Somos un equipo<div class="text-sm font-medium mt-1 text-slate-400">Junta directiva (desde el celular)</div></button>' +
+    "</div></div>";
+}
+
+function statHtml(label, value, accent) {
+  return '<div class="rounded-xl border p-2 text-center ' + (accent ? "border-emerald-500 bg-emerald-950" : "border-slate-700 bg-slate-900") + '">' +
+    '<div class="font-black tabular-nums ' + (accent ? "text-emerald-300" : "") + '">' + value + "</div>" +
+    '<div class="text-xs text-slate-400">' + label + "</div></div>";
+}
+function indicatorsHtml(ind) {
+  return '<div class="grid grid-cols-4 gap-2">' +
+    statHtml("Clientes", ind.cli + "k") + statHtml("Capital", "$" + ind.cap + "M") +
+    statHtml("Reputación", ind.rep) + statHtml("Valoración", valuation(ind), true) + "</div>";
+}
+function timerHtml(cls) {
+  const left = Math.max(0, CONFIG.TIMER - Math.floor((Date.now() - (game.roundStartedAt || Date.now())) / 1000));
+  const mm = Math.floor(left/60), ss = String(left%60).padStart(2,"0");
+  return '<span class="font-black tabular-nums ' + (left <= 30 ? "text-red-400" : cls) + '">' + mm + ":" + ss + "</span>";
+}
+
+// ------------------------- PANTALLA CENTRAL ---------------------------
+function hostView() {
+  if (!game) {
+    return '<div class="p-6 md:p-10 max-w-6xl mx-auto">' + header(false) +
+      '<div class="flex flex-col items-center justify-center py-24 gap-6">' +
+      '<h2 class="text-3xl font-bold">No hay partida activa</h2>' +
+      '<button onclick="createGame()" class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl px-8 py-4 text-lg">Crear nueva partida</button>' +
+      "</div></div>";
+  }
+  const teams = Object.entries(game.teams || {});
+  const ranking = teams.slice().sort((a,b) => valuation(b[1].ind) - valuation(a[1].ind));
+
+  if (game.phase === "lobby") {
+    let cards = teams.map(([id,t]) =>
+      '<div class="rounded-2xl border border-slate-700 bg-slate-900 p-5 text-center">' +
+      '<div class="w-4 h-4 rounded-full mx-auto mb-2" style="background:' + t.color + '"></div>' +
+      '<div class="text-xl font-bold">' + esc(t.name) + '</div>' +
+      '<div class="text-xs text-emerald-400 mt-1">✓ Conectado</div></div>'
+    ).join("");
+    if (!teams.length) cards = '<div class="col-span-full text-center text-slate-500 py-10">Esperando equipos…</div>';
+    return '<div class="p-6 md:p-10 max-w-6xl mx-auto">' + header(true) +
+      '<div class="text-center mb-8"><h2 class="text-4xl font-black mb-2">Sala de espera</h2>' +
+      '<p class="text-slate-400">Cada grupo abre este mismo enlace en su celular, elige <b class="text-slate-200">«Somos un equipo»</b> y registra el nombre de su neobanco.</p></div>' +
+      '<div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-10">' + cards + "</div>" +
+      '<div class="flex justify-center"><button onclick="startGame()" ' + (teams.length ? "" : "disabled") + ' class="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-black rounded-2xl px-10 py-5 text-xl">Iniciar juego (' + teams.length + " " + (teams.length === 1 ? "equipo" : "equipos") + ")</button></div></div>";
+  }
+
+  if (game.phase === "deciding") {
+    const sentCount = teams.filter(([id]) => teamsData[id] && teamsData[id].decisions && teamsData[id].decisions[game.round]).length;
+    const rows = teams.map(([id,t]) => {
+      const sent = teamsData[id] && teamsData[id].decisions && teamsData[id].decisions[game.round];
+      const ov = overrides[id];
+      let editor = "";
+      if (editing === id) {
+        const val = overrides[id] || (sent ? Object.assign({}, ZERO, sent) : Object.assign({}, ZERO));
+        const total = sumAlloc(val);
+        editor = '<div class="mt-3 border-t border-slate-700 pt-3"><div class="grid grid-cols-5 gap-2">' +
+          AREAS.map(a =>
+            '<div class="text-center"><div class="text-lg">' + a.icon + '</div>' +
+            '<div class="flex items-center justify-center gap-1 mt-1">' +
+            '<button onclick="adjOv(\'' + id + '\',\'' + a.id + '\',-1)" class="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 font-bold">−</button>' +
+            '<span class="w-5 text-center font-bold tabular-nums">' + (val[a.id]||0) + "</span>" +
+            '<button onclick="adjOv(\'' + id + '\',\'' + a.id + '\',1)" class="w-6 h-6 rounded bg-slate-700 hover:bg-slate-600 font-bold">+</button>' +
+            "</div></div>"
+          ).join("") + "</div>" +
+          '<div class="flex justify-between items-center mt-2 text-xs">' +
+          '<span class="' + (total === CONFIG.BUDGET ? "text-emerald-400" : "text-amber-400") + '">' + total + "/" + CONFIG.BUDGET + " fichas</span>" +
+          '<button onclick="clearOv(\'' + id + '\')" class="text-slate-400 hover:text-slate-200 underline">quitar manual</button></div></div>';
+      }
+      return '<div class="rounded-xl border border-slate-700 bg-slate-900 p-4">' +
+        '<div class="flex items-center justify-between">' +
+        '<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full" style="background:' + t.color + '"></span><span class="font-bold">' + esc(t.name) + "</span></div>" +
+        '<div class="flex items-center gap-3">' +
+        (ov ? '<span class="text-xs text-amber-400 font-semibold">MANUAL</span>' : sent ? '<span class="text-emerald-400 font-bold">✓ Enviado</span>' : '<span class="text-slate-500">… pensando</span>') +
+        '<button onclick="toggleEdit(\'' + id + '\')" class="text-xs text-slate-400 hover:text-slate-200 underline">manual</button></div></div>' + editor + "</div>";
+    }).join("");
+    return '<div class="p-6 md:p-10 max-w-6xl mx-auto">' + header(true) +
+      '<div class="flex items-center justify-between mb-6 flex-wrap gap-3"><div>' +
+      '<div class="text-emerald-400 font-bold tracking-widest text-sm">RONDA ' + game.round + " DE " + CONFIG.ROUNDS + "</div>" +
+      '<h2 class="text-3xl md:text-4xl font-black">Las juntas directivas están decidiendo…</h2></div>' +
+      '<div class="text-5xl">' + timerHtml("text-slate-100") + "</div></div>" +
+      '<div class="rounded-2xl border border-slate-700 bg-slate-900 p-5 mb-6 text-slate-300">🕵️ Cada junta está leyendo los reportes de sus 5 áreas y repartiendo ' + CONFIG.BUDGET + ' fichas de inversión. El evento de esta ronda se revelará cuando cierres la ronda. <b class="text-slate-100">' + sentCount + "/" + teams.length + " equipos han enviado.</b></div>" +
+      '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">' + rows + "</div>" +
+      '<div class="flex justify-center"><button onclick="resolveRound()" class="bg-red-500 hover:bg-red-400 text-slate-950 font-black rounded-2xl px-10 py-5 text-xl">🚨 Cerrar ronda y revelar el evento</button></div></div>';
+  }
+
+  if (game.phase === "results") {
+    const ev = EVENTS[game.eventRound];
+    const maxVal = Math.max.apply(null, ranking.map(([,t]) => valuation(t.ind)).concat([1]));
+    const cards = ranking.map(([id,t]) => {
+      const o = (game.outcomes||{})[id];
+      if (!o) return "";
+      return '<div class="rounded-xl border border-slate-700 bg-slate-900 p-4">' +
+        '<div class="flex items-center justify-between mb-2">' +
+        '<div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full" style="background:' + t.color + '"></span>' +
+        '<span class="font-bold text-lg">' + esc(t.name) + "</span>" +
+        (o.defaulted ? '<span class="text-xs text-slate-500">(no envió)</span>' : "") + "</div>" +
+        '<span class="text-xs font-black px-3 py-1 rounded-full ' + TIER_STYLE[o.tier] + '">' + TIER_LABEL[o.tier] + "</span></div>" +
+        '<p class="text-slate-300 text-sm mb-2">' + o.msg + (o.shielded ? " Su buena reputación amortiguó la mitad del golpe. 🛡️" : "") + "</p>" +
+        '<div class="flex flex-wrap gap-2">' + fmtDeltas(o.d) + "</div></div>";
+    }).join("");
+    const bars = ranking.map(([id,t], i) => {
+      const val = valuation(t.ind);
+      const o = (game.outcomes||{})[id];
+      const diff = o ? val - o.prevVal : 0;
+      return '<div class="flex items-center gap-3"><div class="w-8 text-right font-black text-slate-400">' + (i+1) + "</div>" +
+        '<div class="flex-1"><div class="flex justify-between text-sm mb-1"><span class="font-bold">' + esc(t.name) + "</span>" +
+        '<span class="tabular-nums">' + val + ' pts <span class="' + (diff >= 0 ? "text-emerald-400" : "text-red-400") + '">(' + (diff >= 0 ? "+" : "") + diff + ")</span></span></div>" +
+        '<div class="h-4 rounded-full bg-slate-800 overflow-hidden"><div class="h-full rounded-full transition-all duration-1000" style="width:' + (val/maxVal*100) + "%;background:" + t.color + '"></div></div></div></div>';
+    }).join("");
+    return '<div class="p-6 md:p-10 max-w-6xl mx-auto">' + header(true) +
+      '<div class="rounded-3xl border-2 border-red-500 bg-red-950 p-6 md:p-8 mb-8">' +
+      '<div class="text-red-400 font-black tracking-widest text-sm mb-1">🚨 ÚLTIMA HORA · RONDA ' + game.eventRound + "</div>" +
+      '<h2 class="text-3xl md:text-5xl font-black text-red-100 mb-3">' + ev.title + "</h2>" +
+      '<p class="text-red-200 text-lg mb-2">' + ev.desc + "</p>" +
+      '<div class="text-red-300 text-sm">' + ev.tag + " · Área clave: <b>" + ev.areaLabel + "</b></div></div>" +
+      '<div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-8">' + cards + "</div>" +
+      '<h3 class="text-2xl font-black mb-4">📊 Ranking · Valoración de cada banco</h3>' +
+      '<div class="flex flex-col gap-2 mb-10">' + bars + "</div>" +
+      '<div class="flex justify-center"><button onclick="nextRound()" class="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-2xl px-10 py-5 text-xl">' +
+      (game.round >= CONFIG.ROUNDS ? "🏆 Ver ganadores" : "▶ Iniciar ronda " + (game.round+1)) + "</button></div></div>";
+  }
+
+  // final
+  const medals = ["🥇","🥈","🥉"];
+  const rows = ranking.map(([id,t], i) =>
+    '<div class="rounded-2xl border p-5 flex items-center justify-between ' + (i===0 ? "border-emerald-500 bg-emerald-950" : "border-slate-700 bg-slate-900") + '">' +
+    '<div class="flex items-center gap-3"><span class="text-3xl">' + (medals[i] || "#" + (i+1)) + '</span>' +
+    '<span class="w-3 h-3 rounded-full" style="background:' + t.color + '"></span>' +
+    '<span class="font-black text-xl">' + esc(t.name) + "</span></div>" +
+    '<div class="text-right"><div class="font-black text-2xl tabular-nums">' + valuation(t.ind) + ' pts</div>' +
+    '<div class="text-xs text-slate-400">' + t.ind.cli + "k clientes · $" + t.ind.cap + "M · rep " + t.ind.rep + "</div></div></div>"
+  ).join("");
+  return '<div class="p-6 md:p-10 max-w-6xl mx-auto">' + header(true) +
+    '<div class="text-center mb-10"><div class="text-emerald-400 font-black tracking-widest text-sm mb-2">RESULTADOS FINALES</div>' +
+    '<h2 class="text-4xl md:text-6xl font-black">🏆 ' + (ranking[0] ? esc(ranking[0][1].name) : "") + " gana</h2>" +
+    '<p class="text-slate-400 mt-3">El neobanco que mejor leyó las señales y priorizó sus inversiones.</p></div>' +
+    '<div class="flex flex-col gap-3 max-w-2xl mx-auto">' + rows + "</div></div>";
+}
+
+// ---------------------------- EQUIPO ----------------------------------
+function teamShell(inner, tName, tColor) {
+  return '<div class="p-4"><div class="max-w-md mx-auto">' +
+    '<div class="flex items-center justify-between mb-4">' +
+    '<button onclick="goHome()" class="text-slate-600 text-xs underline">← salir</button>' +
+    '<div class="flex items-center gap-2 font-black">' +
+    (tColor ? '<span class="w-3 h-3 rounded-full" style="background:' + tColor + '"></span>' : "") +
+    "<span>" + esc(tName || "Tu banco") + "</span></div>" +
+    '<span class="text-xs ' + (connected ? "text-emerald-500" : "text-red-400") + '">●</span></div>' + inner + "</div></div>";
+}
+
+function rulesHtml() {
+  return '<div class="rounded-2xl border border-slate-700 bg-slate-900 p-4 text-sm text-slate-300 mt-4">' +
+    '<div class="font-black mb-2">📜 Cómo se juega</div><ol class="list-decimal list-inside flex flex-col gap-1">' +
+    "<li>Cada ronda, sus 5 áreas les envían reportes. Léanlos con ojo crítico: algunos avisan el peligro real, otros distraen.</li>" +
+    "<li>Repartan " + CONFIG.BUDGET + " fichas de inversión entre las áreas. La inversión se acumula.</li>" +
+    "<li>Al cerrar la ronda ocurre un evento del mundo fintech. Golpea duro a los bancos que ignoraron las señales.</li>" +
+    "<li>Gana el banco con mayor valoración tras " + CONFIG.ROUNDS + " rondas: clientes + capital + reputación.</li></ol></div>";
+}
+
+function teamView() {
+  if (!teamId) {
+    return '<div class="min-h-screen p-6 flex flex-col items-center justify-center">' +
+      '<button onclick="goHome()" class="text-slate-500 text-sm mb-6 underline">← volver</button>' +
+      '<h2 class="text-3xl font-black mb-1">Funda tu neobanco</h2>' +
+      '<p class="text-slate-400 mb-6 text-center">Elijan un nombre con flow. Serán la junta directiva.</p>' +
+      '<input value="' + esc(nameVal) + '" oninput="setName(this.value)" placeholder="Ej: BancoLoco, PayFast, TitanPay…" maxlength="22" class="w-full max-w-sm bg-slate-900 border border-slate-600 rounded-xl px-4 py-4 text-lg text-center font-bold focus:outline-none focus:border-emerald-400 mb-4 text-slate-100">' +
+      '<button onclick="join()" class="w-full max-w-sm bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl py-4 text-lg">Registrar banco</button>' +
+      (errMsg ? '<p class="text-red-400 text-sm mt-4 text-center max-w-sm">' + esc(errMsg) + "</p>" : "") +
+      (game && game.phase !== "lobby" ? '<p class="text-amber-400 text-xs mt-3 text-center max-w-sm">⚠️ La partida ya está en curso. Solo puedes reconectarte con un nombre ya registrado.</p>' : "") +
+      "</div>";
+  }
+
+  const me = game && game.teams ? game.teams[teamId] : null;
+  if (!game || !me) {
+    return teamShell('<div class="text-center py-16 text-slate-400"><div class="text-4xl mb-4">⏳</div>Registrado. Esperando confirmación de la pantalla central…</div>', teamDoc ? teamDoc.name : "");
+  }
+
+  if (game.phase === "lobby") {
+    return teamShell(
+      '<div class="text-center py-10"><div class="text-5xl mb-4">🏦</div>' +
+      '<h3 class="text-2xl font-black mb-2">¡' + esc(me.name) + " está en la sala!</h3>" +
+      '<p class="text-slate-400">Esperando a que los moderadores inicien el juego.</p>' +
+      '<div class="mt-6 text-sm text-slate-500">' + Object.keys(game.teams || {}).length + " equipos conectados</div></div>" + rulesHtml(),
+      me.name, me.color);
+  }
+
+  if (game.phase === "deciding") {
+    const cum = Object.assign({}, ZERO, me.cum || {});
+    const total = sumAlloc(alloc);
+    const reports = reportsFor(game.round, cum).map(r =>
+      '<div class="rounded-xl border border-slate-700 bg-slate-900 text-slate-300 p-3 text-sm">' +
+      '<div class="font-bold mb-1">' + AREA_BY_ID[r.areaId].icon + " " + AREA_BY_ID[r.areaId].name + "</div>" + r.text + "</div>"
+    ).join("");
+    const steppers = AREAS.map(a =>
+      '<div class="flex items-center justify-between rounded-xl border border-slate-700 bg-slate-900 px-3 py-2">' +
+      '<div class="flex items-center gap-2"><span class="text-xl">' + a.icon + '</span><div>' +
+      '<div class="font-bold text-sm">' + a.name + '</div>' +
+      '<div class="text-xs text-slate-500">acumulado: ' + (cum[a.id]||0) + "</div></div></div>" +
+      '<div class="flex items-center gap-2">' +
+      '<button onclick="adjAlloc(\'' + a.id + '\',-1)" class="w-9 h-9 rounded-lg bg-slate-700 active:bg-slate-600 font-black text-lg">−</button>' +
+      '<span class="w-6 text-center font-black text-lg tabular-nums">' + (alloc[a.id]||0) + "</span>" +
+      '<button onclick="adjAlloc(\'' + a.id + '\',1)" class="w-9 h-9 rounded-lg bg-emerald-600 active:bg-emerald-500 font-black text-lg">+</button>' +
+      "</div></div>"
+    ).join("");
+    return teamShell(
+      '<div class="flex items-center justify-between mb-4">' +
+      '<div class="font-black text-emerald-400 tracking-widest text-xs">RONDA ' + game.round + "/" + CONFIG.ROUNDS + "</div>" +
+      timerHtml("text-slate-300") + "</div>" +
+      indicatorsHtml(me.ind) +
+      '<h3 class="font-black text-lg mt-5 mb-2">📥 Reportes de tus áreas</h3>' +
+      '<div class="flex flex-col gap-2 mb-5">' + reports + "</div>" +
+      '<h3 class="font-black text-lg mb-1">💼 Reparte tus ' + CONFIG.BUDGET + " fichas</h3>" +
+      '<p class="text-xs text-slate-400 mb-3">Marketing trae clientes y Tecnología sube tu reputación cada ronda. Las demás áreas te protegen de lo que pueda venir. Tu inversión se acumula ronda a ronda.</p>' +
+      '<div class="flex flex-col gap-2 mb-4">' + steppers + "</div>" +
+      '<div class="text-center font-bold mb-3 ' + (total === CONFIG.BUDGET ? "text-emerald-400" : "text-amber-400") + '">' + (CONFIG.BUDGET - total) + " fichas por asignar</div>" +
+      '<button onclick="submitDecision()" ' + (total !== CONFIG.BUDGET ? "disabled" : "") + ' class="w-full bg-emerald-500 active:bg-emerald-400 disabled:opacity-40 text-slate-950 font-black rounded-xl py-4 text-lg mb-2">' +
+      (sentRound === game.round ? "✓ Enviado — actualizar decisión" : "Enviar decisión de la junta") + "</button>" +
+      (sentRound === game.round ? '<p class="text-center text-xs text-emerald-400">Tu decisión llegó a la pantalla central. Puedes cambiarla hasta que cierre la ronda.</p>' : "") +
+      (errMsg ? '<p class="text-center text-xs text-red-400 mt-2">' + esc(errMsg) + "</p>" : ""),
+      me.name, me.color);
+  }
+
+  if (game.phase === "results") {
+    const ev = EVENTS[game.eventRound];
+    const o = (game.outcomes||{})[teamId];
+    const ranking = Object.entries(game.teams || {}).sort((a,b) => valuation(b[1].ind) - valuation(a[1].ind));
+    const myPos = ranking.findIndex(([id]) => id === teamId) + 1;
+    return teamShell(
+      '<div class="rounded-2xl border-2 border-red-500 bg-red-950 p-4 mb-4">' +
+      '<div class="text-red-400 font-black text-xs tracking-widest mb-1">🚨 ÚLTIMA HORA</div>' +
+      '<h3 class="text-xl font-black text-red-100">' + ev.title + "</h3>" +
+      '<p class="text-red-200 text-sm mt-1">' + ev.desc + "</p></div>" +
+      (o ? '<div class="rounded-2xl border border-slate-700 bg-slate-900 p-4 mb-4">' +
+        '<span class="text-xs font-black px-3 py-1 rounded-full ' + TIER_STYLE[o.tier] + '">' + TIER_LABEL[o.tier] + "</span>" +
+        '<p class="text-slate-200 text-sm mt-3">' + o.msg + (o.shielded ? " Su buena reputación amortiguó la mitad del golpe. 🛡️" : "") + "</p>" +
+        '<div class="flex flex-wrap gap-2 mt-3">' + fmtDeltas(o.d) + "</div></div>" : "") +
+      indicatorsHtml(me.ind) +
+      '<div class="text-center mt-5 mb-3"><div class="text-4xl font-black">#' + myPos + '</div>' +
+      '<div class="text-slate-400 text-sm">tu posición en el ranking</div></div>' +
+      '<div class="flex flex-col gap-1">' +
+      ranking.map(([id,t], i) =>
+        '<div class="flex justify-between text-sm px-3 py-2 rounded-lg ' + (id === teamId ? "bg-slate-800 font-bold" : "text-slate-400") + '">' +
+        "<span>" + (i+1) + ". " + esc(t.name) + "</span>" +
+        '<span class="tabular-nums">' + valuation(t.ind) + " pts</span></div>"
+      ).join("") + "</div>" +
+      '<p class="text-center text-slate-500 text-xs mt-4">Esperando a que los moderadores inicien la siguiente ronda…</p>',
+      me.name, me.color);
+  }
+
+  // final
+  const rankingF = Object.entries(game.teams || {}).sort((a,b) => valuation(b[1].ind) - valuation(a[1].ind));
+  const myPosF = rankingF.findIndex(([id]) => id === teamId) + 1;
+  const medal = myPosF === 1 ? "🏆" : myPosF === 2 ? "🥈" : myPosF === 3 ? "🥉" : "🏦";
+  return teamShell(
+    '<div class="text-center py-8"><div class="text-6xl mb-3">' + medal + "</div>" +
+    '<h3 class="text-3xl font-black">Puesto #' + myPosF + "</h3>" +
+    '<p class="text-slate-400 mt-2">' + (myPosF === 1 ? "¡Su neobanco dominó el mercado!" : "Miren la pantalla central para el resumen final.") + "</p>" +
+    '<div class="mt-6">' + indicatorsHtml(me.ind) + "</div></div>",
+    me.name, me.color);
+}
+
+render();
+</script>
+</body>
+</html>
